@@ -1,9 +1,4 @@
 {
   "buildCommand": "npm run build",
-  "installCommand": "npm ci --legacy-peer-deps",
-  "functions": {
-    "app/**": {
-      "excludeFiles": "node_modules/**"
-    }
-  }
+  "installCommand": "npm ci --legacy-peer-deps"
 }
