@@ -1,7 +1,6 @@
 import path from 'path';
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
-import { viteSingleFile } from 'vite-plugin-singlefile';
 
 export default defineConfig(({ mode }) => {
   // 현재 작업 디렉토리에서 환경 변수 로드
@@ -15,9 +14,7 @@ export default defineConfig(({ mode }) => {
     },
     
     plugins: [
-      react(),
-      // 중요: removeViteModuleLoader: true 설정이 있어야 IIFE 빌드 시 오류가 안 납니다.
-      viteSingleFile({ removeViteModuleLoader: true }) 
+      react()
     ],
 
     resolve: {
