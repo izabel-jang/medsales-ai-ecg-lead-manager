@@ -288,10 +288,10 @@ function buildUserPrompt(
 
   const tierPrompts: Record<Tier, string> = {
     clinic: `${base}【의원 - ECG AI 영업 조사】
-★ "${hospitalName}" 공식 홈페이지에서 원장 이름/전문분야 확인
+★ "${hospitalName}" 공식 홈페이지 검색: site:*.co.kr OR site:*.com "${hospitalName}"
 ★ 내과/순환기 전문이면 ECG AI 수요 높음 → ecgSalesPoints에 반영
 ★ 건강검진 운영 여부 확인 → 검진센터 있으면 영업 기회
-★ 뉴스: "${hospitalName}" 검색`,
+★ 뉴스: "${hospitalName}" 검색 + 지역언론 포함`,
 
     hospital: `${base}【병원급 - ECG AI 영업 조사】
 ★ "${hospitalName}" 공식 홈페이지에서 병원장 + 내과/순환기내과 의료진 확인
@@ -351,7 +351,17 @@ export const analyzeHospital = async (
     try {
       const ai = await getAI();
       const tier = inferTier(hospitalName, hospitalType);
-      const userPrompt = buildUserPrompt(tier, hospitalName, address, hospitalType, hasGeneralExam);
+      const userPrompt = `${buildUserPrompt(tier, hospitalName, address, hospitalType, hasGeneralExam)}
+
+⚠️ **Google 검색 필수 키워드:**
+- "${hospitalName}" site:*.co.kr (병원 공식 홈페이지)
+- "${hospitalName}" site:*.kr (한국 도메인)
+- "${hospitalName}" "의료진" OR "직원소개" OR "병원장"
+- "${hospitalName}" "검진센터" OR "건강검진"
+- "${hospitalName}" "뉴스" OR "보도자료" 
+- "${address.split(' ')[0]} ${hospitalName}" (지역+병원명)
+
+위 키워드로 철저히 검색한 후 정보를 수집하세요.`;
       
       console.log(`[Analyze] ${hospitalName} (${tier}) 분석 시작...`);
 
@@ -359,14 +369,21 @@ export const analyzeHospital = async (
         return await ai.models.generateContent({
           model: 'gemini-2.0-flash',
           contents: userPrompt,
-        config: {
-          systemInstruction: SYSTEM_PROMPT,
-          maxOutputTokens: 4000,
-          tools: [{ googleSearch: {} }]
-          // responseMimeType 제거 - Google Search grounding과 충돌 방지
-        }
-      });
-    }, 'analyzeHospital');
+          config: {
+            systemInstruction: SYSTEM_PROMPT,
+            maxOutputTokens: 4000,
+            tools: [{ 
+              googleSearch: {
+                dynamicRetrievalConfig: {
+                  mode: "MODE_DYNAMIC", 
+                  dynamicThreshold: 0.5
+                }
+              } 
+            }],
+            temperature: 0.1
+          }
+        });
+      }, 'analyzeHospital');
 
     // 응답 텍스트 추출
     let text = '';
