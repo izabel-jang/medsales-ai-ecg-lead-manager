@@ -44,34 +44,52 @@ export const AIInsightPanel: React.FC<Props> = ({ hospital, onClose }) => {
 
   const runAnalysis = useCallback(async (forceRefresh = false) => {
     const cacheKey = hospital.name;
+    console.log("[AI Analysis] 분석 시작:", hospital.name, "강제새로고침:", forceRefresh); // 디버깅용
 
     if (pendingAnalysis[cacheKey]) {
+      console.log("[AI Analysis] 이미 실행 중인 분석 대기 중...");
       return pendingAnalysis[cacheKey];
     }
 
     if (statusRef.current === AnalysisStatus.LOADING) {
+      console.log("[AI Analysis] 현재 로딩 중이므로 중단");
       return resultRef.current;
     }
 
     if (!forceRefresh) {
       const cached = getCachedAnalysis(hospital.name);
       if (cached) {
+        console.log("[AI Analysis] 캐시된 결과 사용");
         setState({ status: AnalysisStatus.SUCCESS, result: cached, error: null });
         return cached;
       }
     }
 
+    console.log("[AI Analysis] 로딩 상태로 전환");
     setState({ status: AnalysisStatus.LOADING, result: null, error: null });
 
     const analysisPromise = (async () => {
-      const data = await analyzeHospital(
-        hospital.name,
-        hospital.address,
-        hospital.type,
-        hospital.hasGeneralExam,
-        forceRefresh
-      );
-      return data;
+      try {
+        // API 키 검증 추가
+        const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+        if (!apiKey) {
+          throw new Error("GEMINI API 키가 설정되지 않았습니다. .env.local 파일을 확인하세요.");
+        }
+
+        console.log("[AI Analysis] analyzeHospital 함수 호출");
+        const data = await analyzeHospital(
+          hospital.name,
+          hospital.address,
+          hospital.type,
+          hospital.hasGeneralExam,
+          forceRefresh
+        );
+        console.log("[AI Analysis] 분석 완료:", data);
+        return data;
+      } catch (error) {
+        console.error("[AI Analysis] 분석 중 오류:", error);
+        throw error;
+      }
     })();
 
     pendingAnalysis[cacheKey] = analysisPromise;
@@ -79,10 +97,12 @@ export const AIInsightPanel: React.FC<Props> = ({ hospital, onClose }) => {
     try {
       const data = await analysisPromise;
       if (isMounted.current) {
+        console.log("[AI Analysis] 성공 상태로 전환");
         setState({ status: AnalysisStatus.SUCCESS, result: data, error: null });
       }
       return data;
     } catch (e) {
+      console.error("[AI Analysis] 최종 오류 처리:", e);
       if (isMounted.current) {
         setState({
           status: AnalysisStatus.ERROR,
@@ -93,6 +113,7 @@ export const AIInsightPanel: React.FC<Props> = ({ hospital, onClose }) => {
       throw e;
     } finally {
       delete pendingAnalysis[cacheKey];
+      console.log("[AI Analysis] 분석 프로세스 종료");
     }
   }, [hospital.address, hospital.hasGeneralExam, hospital.name, hospital.type]);
 
@@ -301,10 +322,29 @@ export const AIInsightPanel: React.FC<Props> = ({ hospital, onClose }) => {
                   <h3 className="text-base font-bold text-slate-800">AI 분석을 시작합니다</h3>
                   <p className="text-xs text-slate-500">Gemini 단일 모드로 병원 정보를 수집합니다.</p>
                   <button
-                    onClick={() => runAnalysis(false)}
-                    className="mt-2 inline-flex items-center justify-center px-4 py-2 text-xs font-bold rounded-lg bg-teal-600 text-white hover:bg-teal-700 transition-colors"
+                    onClick={async () => {
+                      console.log("[Button] 분석 실행 버튼 클릭");
+                      try {
+                        await runAnalysis(false);
+                      } catch (error) {
+                        console.error("[Button] 분석 실행 실패:", error);
+                      }
+                    }}
+                    disabled={status === AnalysisStatus.LOADING}
+                    className={`mt-2 inline-flex items-center justify-center px-4 py-2 text-xs font-bold rounded-lg transition-colors ${
+                      status === AnalysisStatus.LOADING 
+                        ? 'bg-slate-400 text-white cursor-not-allowed' 
+                        : 'bg-teal-600 text-white hover:bg-teal-700'
+                    }`}
                   >
-                    분석 실행
+                    {status === AnalysisStatus.LOADING ? (
+                      <>
+                        <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                        분석 중...
+                      </>
+                    ) : (
+                      '분석 실행'
+                    )}
                   </button>
                 </div>
               </div>
