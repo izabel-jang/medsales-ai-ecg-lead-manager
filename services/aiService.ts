@@ -181,6 +181,37 @@ async function getAI(): Promise<GoogleGenAI> {
 }
 
 // ============================================
+// Google Custom Search 함수 (추가 검색용)  
+// ============================================
+async function customSearch(query: string, hospitalName: string): Promise<string> {
+  try {
+    const keys = await getApiKeys();
+    const searchApiKey = keys.VITE_GOOGLE_SEARCH_API_KEY || import.meta.env.VITE_GOOGLE_SEARCH_API_KEY;
+    const engineId = keys.VITE_SEARCH_ENGINE_ID || import.meta.env.VITE_SEARCH_ENGINE_ID;
+    
+    if (!searchApiKey || !engineId) {
+      return "Custom Search API 키가 설정되지 않음";
+    }
+
+    const searchUrl = `https://www.googleapis.com/customsearch/v1?key=${searchApiKey}&cx=${engineId}&q=${encodeURIComponent(query)}&num=5`;
+    
+    const response = await fetch(searchUrl);
+    const data = await response.json();
+    
+    if (data.items && data.items.length > 0) {
+      return data.items.map((item: any) => 
+        `제목: ${item.title}\nURL: ${item.link}\n요약: ${item.snippet}\n`
+      ).join('\n---\n');
+    }
+    
+    return "검색 결과 없음";
+  } catch (error) {
+    console.error("Custom Search 오류:", error);
+    return "검색 오류 발생";
+  }
+}
+
+// ============================================
 // 유틸리티
 // ============================================
 const cleanText = (text: string): string => {
@@ -365,10 +396,33 @@ export const analyzeHospital = async (
       
       console.log(`[Analyze] ${hospitalName} (${tier}) 분석 시작...`);
 
+      // Custom Search로 추가 정보 수집
+      let customSearchResults = "";
+      try {
+        const searchQueries = [
+          `${hospitalName} site:*.co.kr`,
+          `${hospitalName} 의료진`,
+          `${hospitalName} 병원장`
+        ];
+        
+        for (const query of searchQueries) {
+          const result = await customSearch(query, hospitalName);
+          if (result !== "검색 결과 없음") {
+            customSearchResults += `\n[Custom Search - ${query}]\n${result}\n`;
+          }
+        }
+      } catch (error) {
+        console.error("Custom Search 오류:", error);
+      }
+
+      const enhancedPrompt = `${userPrompt}
+
+${customSearchResults ? `\n=== 추가 검색 정보 ===\n${customSearchResults}\n=== 위 정보도 참고하여 분석하세요 ===` : ''}`;
+
       const response = await withRetry(async () => {
         return await ai.models.generateContent({
           model: 'gemini-2.0-flash',
-          contents: userPrompt,
+          contents: enhancedPrompt,
           config: {
             systemInstruction: SYSTEM_PROMPT,
             maxOutputTokens: 4000,
