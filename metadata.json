@@ -1,0 +1,7 @@
+{
+  "name": "MedSales AI: ECG 잠재고객 매니저",
+  "description": "A comprehensive sales dashboard for medical device sales representatives. Features location-based sorting, advanced filtering, and Gemini AI-powered deep search for pre-sales insights.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
