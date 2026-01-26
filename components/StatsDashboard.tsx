@@ -49,12 +49,12 @@ export const StatsDashboard: React.FC = () => {
 
   // 차트 데이터 준비
   const topCitiesData = Object.entries(stats.cityCounts)
-    .sort(([,a], [,b]) => b - a)
+    .sort(([,a], [,b]) => (Number(b) || 0) - (Number(a) || 0))
     .slice(0, 10)
     .map(([city, count]) => ({ name: city, value: count }));
 
   const typeData = Object.entries(stats.typeCounts)
-    .sort(([,a], [,b]) => b - a)
+    .sort(([,a], [,b]) => (Number(b) || 0) - (Number(a) || 0))
     .map(([type, count]) => ({ name: type, value: count }));
 
   const regionData = Object.entries(stats.regionCounts)
@@ -205,7 +205,7 @@ export const StatsDashboard: React.FC = () => {
                 </thead>
                 <tbody>
                   {Object.entries(stats.cityCounts)
-                    .sort(([,a], [,b]) => b - a)
+                    .sort(([,a], [,b]) => (Number(b) || 0) - (Number(a) || 0))
                     .map(([city, count]) => (
                       <tr key={city} className="border-t">
                         <td className="px-3 py-2">{city}</td>
@@ -230,7 +230,7 @@ export const StatsDashboard: React.FC = () => {
                 </thead>
                 <tbody>
                   {Object.entries(stats.typeCounts)
-                    .sort(([,a], [,b]) => b - a)
+                    .sort(([,a], [,b]) => (Number(b) || 0) - (Number(a) || 0))
                     .map(([type, count]) => (
                       <tr key={type} className="border-t">
                         <td className="px-3 py-2">{type}</td>

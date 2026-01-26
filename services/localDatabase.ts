@@ -44,14 +44,15 @@ class LocalDatabase {
         header: true,
         skipEmptyLines: true,
         encoding: 'UTF-8',
-        transform: (value: string) => value?.trim() || ''
+        transform: (value: string) => value?.trim() || '',
+        complete: (results) => results // 필수 속성 추가
       });
 
-      if (parseResult.errors && parseResult.errors.length > 0) {
-        console.warn('CSV parsing warnings:', parseResult.errors);
+      if ((parseResult as any).errors && (parseResult as any).errors.length > 0) {
+        console.warn('CSV parsing warnings:', (parseResult as any).errors);
       }
 
-      this.hospitals = parseResult.data
+      this.hospitals = (parseResult as any).data
         .map((row, index) => {
           // 데이터 검증
           if (!row['기관명']?.trim()) {
