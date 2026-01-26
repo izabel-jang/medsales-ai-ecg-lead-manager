@@ -11,10 +11,10 @@ const rateLimitState = {
 };
 
 const RATE_LIMIT_CONFIG = {
-  minInterval: 1000, // 4초 → 1초로 단축
-  maxRequestsPerMinute: 20, // 12 → 20으로 증가
-  retryDelay: 30000, // 60초 → 30초로 단축
-  maxRetries: 1, // 2 → 1로 단축
+  minInterval: 1000, // 1초로 복원
+  maxRequestsPerMinute: 15, // 적정한 수준으로
+  retryDelay: 30000, // 30초로 복원
+  maxRetries: 1, // 1회 재시도
 };
 
 async function waitForRateLimit(): Promise<void> {
@@ -84,8 +84,149 @@ const storage = typeof window !== 'undefined' ? window.localStorage : null;
 // 진행 중인 요청 추적 (중복 호출 방지)
 const inFlightRequests = new Map<string, Promise<AIAnalysisResult>>();
 
+// Custom Search 에러 상태 추적
+const customSearchErrorState = {
+  consecutiveErrors: 0,
+  lastErrorTime: 0,
+  isDisabled: false,
+  disabledUntil: 0,
+  isGloballyDisabled: true // Custom Search 비활성화 - Gemini Google Search grounding만 사용
+};
+
+const CUSTOM_SEARCH_ERROR_CONFIG = {
+  maxConsecutiveErrors: 3, // 3번 연속 에러 시 비활성화
+  disableDuration: 5 * 60 * 1000, // 5분간 비활성화
+  errorCooldown: 30 * 1000 // 30초간 에러 발생 시 카운터 리셋
+};
+
+// Custom Search API 상태 진단 및 설정 안내
+async function diagnoseCustomSearchAPI(): Promise<{ isWorking: boolean; error?: string }> {
+  try {
+    const keys = await getApiKeys();
+    const searchApiKey = keys.VITE_GOOGLE_SEARCH_API_KEY || import.meta.env.VITE_GOOGLE_SEARCH_API_KEY;
+    const engineId = keys.VITE_SEARCH_ENGINE_ID || import.meta.env.VITE_SEARCH_ENGINE_ID;
+    
+    console.group('[Custom Search API 진단]');
+    console.log('🔑 API Key 상태:', searchApiKey ? `설정됨 (${searchApiKey.substring(0, 10)}...)` : '❌ 미설정');
+    console.log('🔍 Search Engine ID:', engineId ? `설정됨 (${engineId})` : '❌ 미설정');
+    
+    if (!searchApiKey) {
+      console.error('❌ VITE_GOOGLE_SEARCH_API_KEY가 설정되지 않음');
+      console.log('📋 해결 방법:');
+      console.log('1. Google Cloud Console → APIs & Services → Credentials');
+      console.log('2. API Key 생성 후 Custom Search API 활성화');
+      console.log('3. .env 파일에 VITE_GOOGLE_SEARCH_API_KEY=your_key 추가');
+      console.groupEnd();
+      return { isWorking: false, error: 'API 키 미설정' };
+    }
+    
+    if (!engineId) {
+      console.error('❌ VITE_SEARCH_ENGINE_ID가 설정되지 않음');
+      console.log('📋 해결 방법:');
+      console.log('1. Google Custom Search Engine 생성: https://cse.google.com/');
+      console.log('2. .env 파일에 VITE_SEARCH_ENGINE_ID=your_engine_id 추가');
+      console.groupEnd();
+      return { isWorking: false, error: 'Search Engine ID 미설정' };
+    }
+    
+    // 간단한 테스트 쿼리
+    console.log('🧪 API 연결 테스트 중...');
+    const testUrl = `https://www.googleapis.com/customsearch/v1?key=${searchApiKey}&cx=${engineId}&q=test&num=1`;
+    const response = await fetch(testUrl);
+    
+    if (response.status === 403) {
+      console.error('❌ 403 Forbidden - API 키 또는 권한 문제');
+      console.log('📋 Google Cloud Console 체크리스트:');
+      console.log('1. Custom Search API가 활성화되어 있는지 확인');
+      console.log('2. API 키에 Custom Search API 권한이 있는지 확인');
+      console.log('3. 프로젝트의 결제 계정이 활성화되어 있는지 확인');
+      console.log('4. API 키 제한 설정 확인 (IP, HTTP referrer 등)');
+      console.log('5. 일일 할당량이 남아있는지 확인');
+      console.groupEnd();
+      return { isWorking: false, error: 'API 키 문제 또는 사용 권한 없음' };
+    }
+    
+    if (response.status === 429) {
+      console.error('❌ 429 Too Many Requests - 할당량 초과');
+      console.log('📋 해결 방법:');
+      console.log('1. Google Cloud Console → APIs & Services → Custom Search API');
+      console.log('2. Quotas 탭에서 일일 할당량 확인');
+      console.log('3. 필요시 할당량 증가 요청');
+      console.groupEnd();
+      return { isWorking: false, error: '할당량 초과' };
+    }
+    
+    if (!response.ok) {
+      console.error(`❌ HTTP ${response.status}: ${response.statusText}`);
+      console.groupEnd();
+      return { isWorking: false, error: `HTTP ${response.status}` };
+    }
+    
+    const data = await response.json();
+    if (data.error) {
+      console.error('❌ API 응답 에러:', data.error);
+      console.groupEnd();
+      return { isWorking: false, error: data.error.message };
+    }
+    
+    console.log('✅ Custom Search API 연결 성공!');
+    console.log(`📊 검색 결과: ${data.items?.length || 0}개 항목 반환`);
+    console.groupEnd();
+    return { isWorking: true };
+    
+  } catch (error: any) {
+    console.error('❌ 네트워크 또는 연결 오류:', error);
+    console.groupEnd();
+    return { isWorking: false, error: error?.message || '네트워크 오류' };
+  }
+}
+
 function getCacheKey(hospitalName: string, mode: string): string {
   return `${CACHE_PREFIX}${mode}_${hospitalName.replace(/\s+/g, '_').toLowerCase()}`;
+}
+
+// Custom Search 에러 상태 체크
+function checkCustomSearchAvailability(): boolean {
+  // 전역 비활성화 체크
+  if (customSearchErrorState.isGloballyDisabled) {
+    return false;
+  }
+  
+  const now = Date.now();
+  
+  // 비활성화 시간이 지났으면 재활성화
+  if (customSearchErrorState.isDisabled && now > customSearchErrorState.disabledUntil) {
+    customSearchErrorState.isDisabled = false;
+    customSearchErrorState.consecutiveErrors = 0;
+    console.log('[Custom Search] 재활성화됨');
+  }
+  
+  return !customSearchErrorState.isDisabled;
+}
+
+// Custom Search 에러 기록
+function recordCustomSearchError(errorType: 'API_ERROR' | 'QUOTA_EXCEEDED'): void {
+  const now = Date.now();
+  customSearchErrorState.consecutiveErrors++;
+  customSearchErrorState.lastErrorTime = now;
+  
+  console.warn(`[Custom Search] 에러 발생 (${customSearchErrorState.consecutiveErrors}/${CUSTOM_SEARCH_ERROR_CONFIG.maxConsecutiveErrors}): ${errorType}`);
+  
+  // 연속 에러 한계 도달 시 비활성화
+  if (customSearchErrorState.consecutiveErrors >= CUSTOM_SEARCH_ERROR_CONFIG.maxConsecutiveErrors) {
+    customSearchErrorState.isDisabled = true;
+    customSearchErrorState.disabledUntil = now + CUSTOM_SEARCH_ERROR_CONFIG.disableDuration;
+    console.warn(`[Custom Search] ${CUSTOM_SEARCH_ERROR_CONFIG.disableDuration/60000}분간 비활성화됨`);
+  }
+}
+
+// Custom Search 성공 기록 (에러 카운터 리셋)
+function recordCustomSearchSuccess(): void {
+  const now = Date.now();
+  // 마지막 에러로부터 충분한 시간이 지났으면 카운터 리셋
+  if (now - customSearchErrorState.lastErrorTime > CUSTOM_SEARCH_ERROR_CONFIG.errorCooldown) {
+    customSearchErrorState.consecutiveErrors = 0;
+  }
 }
 
 export function getCachedAnalysis(hospitalName: string, mode: string = 'standard'): AIAnalysisResult | null {
@@ -190,23 +331,47 @@ async function customSearch(query: string, hospitalName: string): Promise<string
     const engineId = keys.VITE_SEARCH_ENGINE_ID || import.meta.env.VITE_SEARCH_ENGINE_ID;
     
     if (!searchApiKey || !engineId) {
+      console.log(`[Custom Search] API 키 미설정 (${hospitalName})`);
       return "Custom Search API 키가 설정되지 않음";
     }
 
     const searchUrl = `https://www.googleapis.com/customsearch/v1?key=${searchApiKey}&cx=${engineId}&q=${encodeURIComponent(query)}&num=5`;
     
     const response = await fetch(searchUrl);
+    
+    if (!response.ok) {
+      if (response.status === 403) {
+        recordCustomSearchError('QUOTA_EXCEEDED');
+        return "Custom Search API 접근 제한 (403)";
+      } else if (response.status === 429) {
+        recordCustomSearchError('QUOTA_EXCEEDED');
+        return "Custom Search API 할당량 초과 (429)";
+      }
+      recordCustomSearchError('API_ERROR');
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+    
     const data = await response.json();
     
+    if (data.error) {
+      console.error(`[Custom Search] API 오류 (${hospitalName}):`, data.error);
+      recordCustomSearchError('API_ERROR');
+      return `Custom Search API 오류: ${data.error.message || data.error.code || '알 수 없는 오류'}`;
+    }
+    
     if (data.items && data.items.length > 0) {
+      recordCustomSearchSuccess(); // 성공 기록
+      console.log(`[Custom Search] 성공 (${hospitalName}): ${data.items.length}개 결과`);
       return data.items.map((item: any) => 
         `제목: ${item.title}\nURL: ${item.link}\n요약: ${item.snippet}\n`
       ).join('\n---\n');
     }
     
+    console.log(`[Custom Search] 검색 결과 없음 (${hospitalName})`);
     return "검색 결과 없음";
-  } catch (error) {
-    console.error("Custom Search 오류:", error);
+  } catch (error: any) {
+    console.error(`[Custom Search] 오류 (${hospitalName}):`, error?.message || error);
+    recordCustomSearchError('API_ERROR');
     return "검색 오류 발생";
   }
 }
@@ -214,19 +379,34 @@ async function customSearch(query: string, hospitalName: string): Promise<string
 // ============================================
 // 유틸리티
 // ============================================
+
+// 병원명에서 핵심 부분만 추출 (검색 효율성 향상)
+function extractCoreHospitalName(fullName: string): string {
+  let core = fullName
+    .replace(/의료법인\s*[^\s]*\s*/g, '') // "의료법인 성세의료재단" 제거
+    .replace(/재단법인\s*[^\s]*\s*/g, '') // "재단법인 xxx" 제거
+    .replace(/학교법인\s*[^\s]*\s*/g, '') // "학교법인 xxx" 제거
+    .replace(/사회복지법인\s*[^\s]*\s*/g, '') // "사회복지법인 xxx" 제거
+    .replace(/\(.*?\)/g, '') // 괄호 내용 제거
+    .trim();
+  
+  console.log(`[ExtractCore] "${fullName}" → "${core}"`);
+  return core || fullName; // 추출 실패 시 원본 반환
+}
+
 const cleanText = (text: string): string => {
   if (!text) return '';
   return text.replace(/<[^>]*>/g, '').replace(/&[^;]+;/g, ' ').replace(/\[\d+\]/g, '').replace(/\s+/g, ' ').trim();
 };
 
-const isValidUrl = (url: string | undefined | null): boolean => {
+const isValidUrl = (url: string | undefined | null, hospitalName?: string, isNewsUrl: boolean = false): boolean => {
   if (!url || typeof url !== 'string') return false;
   const trimmed = url.trim();
   if (!trimmed || trimmed === '#') return false;
   if (!(trimmed.startsWith('http://') || trimmed.startsWith('https://'))) return false;
-  // 검색/지도 리디렉션 차단
-  const banned = ['search.naver.com', 'map.naver.com', 'google.com/search', 'bing.com/search'];
-  return !banned.some(b => trimmed.toLowerCase().includes(b));
+  
+  // 모든 URL 허용 - Gemini Google Search grounding 결과 신뢰
+  return true;
 };
 
 // ============================================
@@ -245,15 +425,17 @@ const SYSTEM_PROMPT = `당신은 딥카디오(DeepCardio)라는 심전도 AI 솔
 2. ★★★ 해당 병원 정보만 작성. 다른 병원 정보 절대 혼동 금지 ★★★
 3. 의료진: 반드시 해당 병원 공식 홈페이지에서 확인 (추측/생성 금지)
 4. JSON 한 번만 출력 (중복 금지)
+5. ★★★ 편향 방지: 폐업/폐쇄 관련 정보가 검색되더라도 현재 운영 상태를 우선 확인하고 균형잡힌 정보 제공 ★★★
+6. ★★★ 최신성: 2024-2026년 정보를 우선하고, 과거 정보는 명확히 구분 ★★★
 
 ■ 출력: 순수 JSON만 (마크다운 없이)
 {
   "summary": "기본 정보 제외 (이름, 주소 등), 실제 주력 진료과 (예: 관절/정형 전문일수도 있음), 대표 정체성, 가치, 병상수, 검진센터 및 심장/순환기 관련 특징",
   "operatingHours": {
     "text": "★ 형식 엄수: '월-금 09:00~18:00 | 토 09:00~13:00 | 점심 12:30~2:00 | 일/공휴일 휴진' (요일별 시간표 한 줄 요약, 모호한 표현 금지, 방문을 위해 필요한 정보이니 정확해야함)",
-    "source": "출처URL (공식 홈페이지, 모두닥 등)"
+    "source": "출처URL (반드시 실제 병원 공식 홈페이지 URL만 기입. Google 리다이렉트 링크나 검색 결과 페이지 금지. 예: hospital.co.kr, clinic.or.kr 등)"
   },
-  "website": "공식 홈페이지 URL",
+  "website": "★ 최우선 과제: 실제 병원 공식 홈페이지 URL 반드시 검색하여 찾기. ★★★ 정확히 해당 병원만의 공식 홈페이지만 기입 ★★★ site:*.co.kr OR site:*.or.kr OR site:*.ac.kr 검색 필수. Google 리다이렉트 링크 절대 금지. 실제 접속 가능한 병원 홈페이지만 기입. 찾지 못했으면 null",
   "aiAdoptionStatus": "해당 병원의 AI 협력 또는 도입 현황 (타병원 정보 X)",
   "equipmentInfo": "심전도기, CT, MRI 등 보유 장비 (모델 및 제조사 명시 권장)",
   "doctorListPageUrl": "★ 의료진 전체 목록 페이지 URL 1개 (예: hospital.com/doctors)",
@@ -263,7 +445,7 @@ const SYSTEM_PROMPT = `당신은 딥카디오(DeepCardio)라는 심전도 AI 솔
   ],
   "reviewSummary": {"sentiment": "Positive|Neutral|Negative|Unknown", "text": "리뷰요약"},
   "ecgSalesPoints": ["[기회] 심전도AI 도입 필요성", "[전략] 접근방법", "[타이밍] 제안시점", "[리스크] 주의사항"],
-  "recentNews": [{"title": "제목", "url": "기사URL (반드시 일치해야함)", "date": "YYYY-MM-DD"}],
+  "recentNews": [{"title": "제목", "url": "기사URL (반드시 일치해야함)", "date": "YYYY-MM-DD"}], // ★ 해당 병원 이름이 제목에 포함된 직접적 관련 뉴스만
   "additionalInsights": ["해당 병원만의 인사이트 (타병원 정보 절대 금지)"]
 }
 
@@ -319,10 +501,11 @@ function buildUserPrompt(
 
   const tierPrompts: Record<Tier, string> = {
     clinic: `${base}【의원 - ECG AI 영업 조사】
-★ "${hospitalName}" 공식 홈페이지 검색: site:*.co.kr OR site:*.com "${hospitalName}"
+★ 최우선: "${hospitalName}" site:*.co.kr 검색으로 공식 홈페이지 URL 반드시 찾기
 ★ 내과/순환기 전문이면 ECG AI 수요 높음 → ecgSalesPoints에 반영
 ★ 건강검진 운영 여부 확인 → 검진센터 있으면 영업 기회
-★ 뉴스: "${hospitalName}" 검색 + 지역언론 포함`,
+★ 뉴스: 해당 병원 이름이 제목에 정확히 포함된 뉴스만 (의료사고, 개원, 이전, 확장, 장비도입 등만 해당)
+⚠️ website 필드는 절대 비워두지 말고 반드시 검색해서 찾기`,
 
     hospital: `${base}【병원급 - ECG AI 영업 조사】
 ★ "${hospitalName}" 공식 홈페이지에서 병원장 + 내과/순환기내과 의료진 확인
@@ -330,7 +513,7 @@ function buildUserPrompt(
 ★ 병상수, 연간 검진 건수 등 규모 파악
 ★ ecgSalesPoints: 이 병원에 ECG AI를 왜, 어떻게 팔 수 있는지 구체적으로
 ★ AI 솔루션: "${hospitalName} AI" 검색 → 해당 병원 도입 기사만 기재 (타병원 X)
-★ 뉴스: "${hospitalName}" 검색하여 4~6개 (URL 포함)
+★ 뉴스: "${hospitalName}" 이름이 제목에 포함된 해당 병원 관련 뉴스만 2~4개 (확장, 장비도입, 의료진 영입, 개원행사 등)
 ⚠️ additionalInsights에 다른 병원 정보 절대 넣지 말 것`,
 
     tertiary: `${base}【종합병원 - ECG AI 영업 조사】
@@ -339,14 +522,14 @@ function buildUserPrompt(
 ★ 스마트병원/AI 도입 현황: "${hospitalName} AI" "${hospitalName} 스마트병원" 검색
    → 해당 병원 기사만 aiAdoptionStatus에 (타병원 정보 혼동 금지)
 ★ ecgSalesPoints: 대형병원 대상 ECG AI 영업 전략 구체적으로
-★ 뉴스: "${hospitalName}" 검색하여 6~10개 반드시 찾기
+★ 뉴스: "${hospitalName}" 이름이 제목에 포함된 해당 병원 관련 뉴스만 4~6개 (증축, 센터개소, 장비도입, 의료진영입, 정책변화 등)
 ⚠️ 이 병원 정보만 작성. 비슷한 이름의 다른 병원 정보 절대 금지`,
 
     public: `${base}【보건기관 - ECG AI 영업 조사】
 ★ "${hospitalName}" 관할 지자체, 소장/센터장 확인
 ★ 조달청 입찰/지자체 예산이 구매 결정 포인트
 ★ 디지털헬스케어 시범사업 참여 여부 → aiAdoptionStatus
-★ 뉴스: "${hospitalName}" 검색하여 지역언론 기사
+★ 뉴스: "${hospitalName}" 이름이 제목에 포함된 해당 보건기관 관련 뉴스만 (사업확대, 예산편성, 장비도입, 인사변동 등)
 ⚠️ 해당 보건기관 정보만 (타 기관 정보 금지)`
   };
 
@@ -364,10 +547,18 @@ export const analyzeHospital = async (
   forceRefresh: boolean = false
 ): Promise<AIAnalysisResult> => {
   
-  // 1. 캐시 확인
+  // 1. 캐시 확인 (website 누락 시 강제 재분석)
   if (!forceRefresh) {
     const cached = getCachedAnalysis(hospitalName, 'standard');
-    if (cached) return cached;
+    if (cached) {
+      // website 필드가 없거나 undefined면 강제 재분석
+      if (!cached.website) {
+        console.log(`[Analyze] ${hospitalName} - 캐시에 website 없음, 강제 재분석 실행`);
+        clearHospitalCache(hospitalName); // 캐시 삭제
+      } else {
+        return cached;
+      }
+    }
   }
 
   // 2. 진행 중인 요청 확인 (중복 호출 방지)
@@ -382,55 +573,37 @@ export const analyzeHospital = async (
     try {
       const ai = await getAI();
       const tier = inferTier(hospitalName, hospitalType);
+      
+      // 병원명에서 핵심 부분 추출 (검색 효율성 향상)
+      const coreHospitalName = extractCoreHospitalName(hospitalName);
+      const searchLocation = address.split(' ')[0]; // 지역명 (예: "인천")
+      
       const userPrompt = `${buildUserPrompt(tier, hospitalName, address, hospitalType, hasGeneralExam)}
 
-⚠️ **Google 검색 필수 키워드:**
-- "${hospitalName}" site:*.co.kr (병원 공식 홈페이지)
-- "${hospitalName}" site:*.kr (한국 도메인)
-- "${hospitalName}" "의료진" OR "직원소개" OR "병원장"
-- "${hospitalName}" "검진센터" OR "건강검진"
-- "${hospitalName}" "뉴스" OR "보도자료" 
-- "${address.split(' ')[0]} ${hospitalName}" (지역+병원명)
+⚠️ **Google 검색 필수 키워드 (실제 병원 공식홈페이지 최우선, Google 리다이렉트 링크 금지):**
+- "${coreHospitalName}" site:*.co.kr (사립병원 홈페이지 1순위)
+- "${coreHospitalName}" site:*.or.kr (의료법인/공익법인 병원)
+- "${coreHospitalName}" site:*.ac.kr (대학병원)
+- "${coreHospitalName}" site:*.go.kr (공공병원/보건기관)
+- "${coreHospitalName}" site:*.kr (기타 한국 도메인)
+- "${coreHospitalName}" "홈페이지" OR "공식사이트" OR "병원소개"
+- "${coreHospitalName}" "의료진" OR "직원소개" OR "병원장" OR "원장"
+- "${coreHospitalName}" "검진센터" OR "건강검진" OR "종합검진"
+- "${coreHospitalName}" "진료시간" OR "외래진료" OR "진료안내"
+- "${searchLocation} ${coreHospitalName}" (지역+병원명 조합)
+- "${coreHospitalName} ${searchLocation}" (병원명+지역 조합)
+- "${coreHospitalName}" "채용" OR "공지사항" OR "뉴스"
+- "${coreHospitalName}" "시설" OR "장비" OR "센터"
+- "${coreHospitalName}" -"폐업" -"폐쇄" -"폐원" (부정적 정보 제외)
+- "${coreHospitalName}" filetype:pdf (병원 안내서 등)
 
-위 키워드로 철저히 검색한 후 정보를 수집하세요.`;
+★★★ 반드시 현재 운영 중인 병원의 실제 공식 홈페이지 URL(예: hospital.co.kr)을 찾아서 website 필드에 기입하세요. ★★★
+⚠️ vertexaisearch.cloud.google.com, grounding-api-redirect 같은 Google 리다이렉트 링크는 절대 기입하지 마세요.
+⚠️ 폐업/폐쇄 관련 정보가 나와도 현재 운영 상태를 우선적으로 확인하고 정확한 정보를 제공하세요.`;
       
       console.log(`[Analyze] ${hospitalName} (${tier}) 분석 시작...`);
-
-      // Custom Search로 추가 정보 수집 (병렬 실행) - 빠른 모드를 위해 선택적
-      let customSearchResults = "";
-      const useCustomSearch = true; // false로 설정하면 더 빠른 분석
       
-      if (useCustomSearch) {
-        try {
-          const searchQueries = [
-            `${hospitalName} site:*.co.kr`,
-            `${hospitalName} 의료진`,
-            `${hospitalName} 병원장`
-          ];
-          
-          // 병렬 실행으로 속도 개선
-          const searchPromises = searchQueries.map(query => 
-            Promise.race([
-              customSearch(query, hospitalName),
-              new Promise(resolve => setTimeout(() => resolve("시간초과"), 3000))
-            ])
-          );
-          
-          const results = await Promise.all(searchPromises);
-          
-          results.forEach((result, index) => {
-            if (result !== "검색 결과 없음" && result !== "시간초과") {
-              customSearchResults += `\n[Custom Search - ${searchQueries[index]}]\n${result}\n`;
-            }
-          });
-        } catch (error) {
-          console.error("Custom Search 오류:", error);
-        }
-      }
-
-      const enhancedPrompt = `${userPrompt}
-
-${customSearchResults ? `\n=== 추가 검색 정보 ===\n${customSearchResults}\n=== 위 정보도 참고하여 분석하세요 ===` : ''}`;
+      const enhancedPrompt = userPrompt;
 
       const response = await withRetry(async () => {
         return await ai.models.generateContent({
@@ -443,7 +616,7 @@ ${customSearchResults ? `\n=== 추가 검색 정보 ===\n${customSearchResults}\
               googleSearch: {
                 dynamicRetrievalConfig: {
                   mode: "MODE_DYNAMIC", 
-                  dynamicThreshold: 0.5
+                  dynamicThreshold: 0.3 // 0.5 → 0.3으로 낮춰서 더 많은 검색 결과 확보
                 }
               } 
             }],
@@ -549,19 +722,19 @@ ${customSearchResults ? `\n=== 추가 검색 정보 ===\n${customSearchResults}\
       operatingHours: typeof parsed.operatingHours === 'object'
         ? {
             text: parsed.operatingHours.text || '확인 불가',
-            source: isValidUrl(parsed.operatingHours.source) ? parsed.operatingHours.source : ''
+            source: isValidUrl(parsed.operatingHours.source, hospitalName) ? parsed.operatingHours.source : ''
           }
         : { text: cleanText(parsed.operatingHours || '확인 불가'), source: '' },
-      website: isValidUrl(parsed.website) ? parsed.website : undefined,
+      website: isValidUrl(parsed.website, hospitalName) ? parsed.website : undefined,
       aiAdoptionStatus: cleanText(parsed.aiAdoptionStatus || '정보 없음'),
       equipmentInfo: cleanText(parsed.equipmentInfo || '정보 없음'),
       doctorProfiles: Array.isArray(parsed.doctorProfiles)
         ? parsed.doctorProfiles.map((d: any) => ({
             name: typeof d === 'string' ? cleanText(d) : cleanText(d.name || ''),
-            url: typeof d === 'object' && isValidUrl(d.url) ? d.url : undefined
+            url: typeof d === 'object' && isValidUrl(d.url, hospitalName) ? d.url : undefined
           }))
         : [],
-      doctorListPageUrl: isValidUrl(parsed.doctorListPageUrl) ? parsed.doctorListPageUrl : undefined,
+      doctorListPageUrl: isValidUrl(parsed.doctorListPageUrl, hospitalName) ? parsed.doctorListPageUrl : undefined,
       reviewSummary: {
         sentiment: (['Positive', 'Negative', 'Neutral', 'Unknown'].includes(parsed.reviewSummary?.sentiment) 
           ? parsed.reviewSummary.sentiment 
@@ -576,7 +749,7 @@ ${customSearchResults ? `\n=== 추가 검색 정보 ===\n${customSearchResults}\
             .filter((n: any) => n && n.title)
             .map((n: any) => ({ 
               title: cleanText(n.title), 
-              url: isValidUrl(n.url) ? n.url : '', 
+              url: isValidUrl(n.url, hospitalName, true) ? n.url : '', // 뉴스 URL로 표시
               date: n.date || '' 
             }))
         : [],
@@ -584,6 +757,24 @@ ${customSearchResults ? `\n=== 추가 검색 정보 ===\n${customSearchResults}\
         ? parsed.additionalInsights.map(cleanText)
         : []
     };
+
+    // 🔧 후처리: operatingHours.source에 공식 웹사이트가 있고 website가 비어있으면 복사
+    if (!result.website && result.operatingHours.source && isValidUrl(result.operatingHours.source, hospitalName)) {
+      const sourceUrl = result.operatingHours.source.toLowerCase();
+      // 병원 공식 웹사이트로 판단되는 URL인지 확인
+      const isHospitalWebsite = (
+        sourceUrl.includes('.co.kr') || 
+        sourceUrl.includes('.or.kr') || 
+        sourceUrl.includes('.ac.kr') || 
+        sourceUrl.includes('.go.kr') || 
+        (sourceUrl.includes('.kr') && !sourceUrl.includes('naver.com') && !sourceUrl.includes('google.com'))
+      ) && !sourceUrl.includes('blog') && !sourceUrl.includes('cafe') && !sourceUrl.includes('search');
+      
+      if (isHospitalWebsite) {
+        result.website = result.operatingHours.source;
+        console.log(`[PostProcess] ${hospitalName} - operatingHours.source를 website로 복사: ${result.website}`);
+      }
+    }
 
     setCachedAnalysis(hospitalName, 'standard', result);
     console.log(`[Analyze] ${hospitalName} 완료 (${tier})`);
