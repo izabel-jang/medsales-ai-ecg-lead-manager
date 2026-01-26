@@ -136,12 +136,17 @@ export const AIInsightPanel: React.FC<Props> = ({ hospital, onClose }) => {
   };
 
   const sanitizeHomepageUrl = (url?: string | null) => {
+    console.log("[Debug] Raw website URL:", url); // 디버깅용
     if (!url) return null;
     const trimmed = url.trim();
     if (!/^https?:\/\//i.test(trimmed)) return null;
     const lower = trimmed.toLowerCase();
     const banned = ['map.naver.com', 'search.naver.com', 'google.com/search', 'naver.com/v5/search'];
-    if (banned.some((needle) => lower.includes(needle))) return null;
+    if (banned.some((needle) => lower.includes(needle))) {
+      console.log("[Debug] Banned URL filtered:", trimmed); // 디버깅용
+      return null;
+    }
+    console.log("[Debug] Valid website URL:", trimmed); // 디버깅용
     return trimmed;
   };
 

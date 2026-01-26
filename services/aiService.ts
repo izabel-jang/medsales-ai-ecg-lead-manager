@@ -11,10 +11,10 @@ const rateLimitState = {
 };
 
 const RATE_LIMIT_CONFIG = {
-  minInterval: 4000,
-  maxRequestsPerMinute: 12,
-  retryDelay: 60000,
-  maxRetries: 2,
+  minInterval: 1000, // 4초 → 1초로 단축
+  maxRequestsPerMinute: 20, // 12 → 20으로 증가
+  retryDelay: 30000, // 60초 → 30초로 단축
+  maxRetries: 1, // 2 → 1로 단축
 };
 
 async function waitForRateLimit(): Promise<void> {
@@ -396,23 +396,36 @@ export const analyzeHospital = async (
       
       console.log(`[Analyze] ${hospitalName} (${tier}) 분석 시작...`);
 
-      // Custom Search로 추가 정보 수집
+      // Custom Search로 추가 정보 수집 (병렬 실행) - 빠른 모드를 위해 선택적
       let customSearchResults = "";
-      try {
-        const searchQueries = [
-          `${hospitalName} site:*.co.kr`,
-          `${hospitalName} 의료진`,
-          `${hospitalName} 병원장`
-        ];
-        
-        for (const query of searchQueries) {
-          const result = await customSearch(query, hospitalName);
-          if (result !== "검색 결과 없음") {
-            customSearchResults += `\n[Custom Search - ${query}]\n${result}\n`;
-          }
+      const useCustomSearch = true; // false로 설정하면 더 빠른 분석
+      
+      if (useCustomSearch) {
+        try {
+          const searchQueries = [
+            `${hospitalName} site:*.co.kr`,
+            `${hospitalName} 의료진`,
+            `${hospitalName} 병원장`
+          ];
+          
+          // 병렬 실행으로 속도 개선
+          const searchPromises = searchQueries.map(query => 
+            Promise.race([
+              customSearch(query, hospitalName),
+              new Promise(resolve => setTimeout(() => resolve("시간초과"), 3000))
+            ])
+          );
+          
+          const results = await Promise.all(searchPromises);
+          
+          results.forEach((result, index) => {
+            if (result !== "검색 결과 없음" && result !== "시간초과") {
+              customSearchResults += `\n[Custom Search - ${searchQueries[index]}]\n${result}\n`;
+            }
+          });
+        } catch (error) {
+          console.error("Custom Search 오류:", error);
         }
-      } catch (error) {
-        console.error("Custom Search 오류:", error);
       }
 
       const enhancedPrompt = `${userPrompt}
