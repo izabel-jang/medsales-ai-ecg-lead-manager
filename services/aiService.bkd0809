@@ -604,21 +604,25 @@ export const analyzeHospital = async (
       console.log(`[Analyze] ${hospitalName} (${tier}) 분석 시작...`);
       
       const enhancedPrompt = userPrompt;
+
       const response = await withRetry(async () => {
         return await ai.models.generateContent({
-        model: 'gemini-3.6-flash',
-        contents: enhancedPrompt,
-        config: {
-      	systemInstruction: SYSTEM_PROMPT,
-      	maxOutputTokens: 4000,
-      	tools: [
-             {
-          	 googleSearch: {}
-             }
-          ],
-        temperature: 0.1
-       }
-      });
+          model: 'gemini-3.6-flash',
+          contents: enhancedPrompt,
+          config: {
+            systemInstruction: SYSTEM_PROMPT,
+            maxOutputTokens: 4000,
+            tools: [{ 
+              googleSearch: {
+                dynamicRetrievalConfig: {
+                  mode: "MODE_DYNAMIC", 
+                  dynamicThreshold: 0.3 // 0.5 → 0.3으로 낮춰서 더 많은 검색 결과 확보
+                }
+              } 
+            }],
+            temperature: 0.1
+          }
+        });
       }, 'analyzeHospital');
 
     // 응답 텍스트 추출
