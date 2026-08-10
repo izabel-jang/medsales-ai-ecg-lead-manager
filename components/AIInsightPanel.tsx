@@ -412,7 +412,7 @@ export const AIInsightPanel: React.FC<Props> = ({ hospital, onClose }) => {
                   </h4>
                   <div className="bg-slate-50 rounded-lg p-4 border border-slate-100 space-y-4">
                     <div>
-                      <span className="text-xs font-bold text-slate-500 block mb-1">타 AI 솔루션 도입 (Openness)</span>
+                      <span className="text-xs font-bold text-slate-500 block mb-1">타 AI 솔루션 도입</span>
                       <p className="text-sm text-slate-700 font-medium whitespace-pre-line">{result.aiAdoptionStatus}</p>
                     </div>
                     <div>
