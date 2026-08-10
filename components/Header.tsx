@@ -11,7 +11,7 @@ export const Header: React.FC = () => {
           </div>
           <div>
             <h1 className="text-xl font-bold tracking-tight text-slate-900">MedSales AI</h1>
-            <p className="text-xs text-slate-500 font-medium">ECG 영업 솔루션 & 잠재고객 매니저</p>
+            <p className="text-xs text-slate-500 font-medium">심전도 영업 솔루션 & 잠재고객 매니저</p>
           </div>
         </div>
         <div className="flex items-center space-x-4 text-sm">
