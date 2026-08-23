@@ -540,12 +540,11 @@ function buildUserPrompt(
 // 메인 분석 함수
 // ============================================
 export const analyzeHospital = async (
-  hospitalName: string,
+  hospitalName: string, 
   address: string,
   hospitalType?: string,
   hasGeneralExam?: boolean,
-  forceRefresh: boolean = false,
-  language: 'ko' | 'en' = 'ko'
+  forceRefresh: boolean = false
 ): Promise<AIAnalysisResult> => {
   
   // 1. 캐시 확인 (website 누락 시 강제 재분석)
@@ -604,35 +603,13 @@ export const analyzeHospital = async (
       
       console.log(`[Analyze] ${hospitalName} (${tier}) 분석 시작...`);
       
-     const languageInstruction =
-  language === 'en'
-    ? `
-IMPORTANT OUTPUT LANGUAGE REQUIREMENT:
-- Write ALL analysis content in English.
-- All summaries, findings, sales insights, recommendations, explanations, and comments must be in English.
-- Keep hospital names, doctor names, organization names, addresses, and other proper nouns in their original form when appropriate.
-- Keep the existing JSON keys and JSON structure exactly unchanged.
-- Do NOT translate JSON property names.
-- Only translate the human-readable content contained in the JSON values into English.
-`
-    : `
-IMPORTANT OUTPUT LANGUAGE REQUIREMENT:
-- 모든 분석 내용, 요약, 영업 인사이트, 추천 및 설명을 한국어로 작성하세요.
-- JSON key와 JSON 구조는 현재 형식을 그대로 유지하세요.
-`;
-
-const enhancedPrompt = `${userPrompt}
-
-${languageInstruction}`; 
-
-
+      const enhancedPrompt = userPrompt;
       const response = await withRetry(async () => {
         return await ai.models.generateContent({
         model: 'gemini-3.6-flash',
         contents: enhancedPrompt,
         config: {
-      	systemInstruction: `${SYSTEM_PROMPT}
-        ${languageInstruction}`,
+      	systemInstruction: SYSTEM_PROMPT,
       	maxOutputTokens: 4000,
       	tools: [
              {

@@ -10,7 +10,6 @@ const pendingAnalysis: Record<string, Promise<AIAnalysisResult>> = {};
 interface Props {
   hospital: Hospital;
   onClose: () => void;
-  language: 'ko' | 'en';
 }
 
 interface AnalysisState {
@@ -19,7 +18,7 @@ interface AnalysisState {
   error: string | null;
 }
 
-export const AIInsightPanel: React.FC<Props> = ({ hospital, onClose, language }) => {
+export const AIInsightPanel: React.FC<Props> = ({ hospital, onClose }) => {
   const [state, setState] = useState<AnalysisState>({
     status: AnalysisStatus.IDLE,
     result: null,
@@ -44,7 +43,7 @@ export const AIInsightPanel: React.FC<Props> = ({ hospital, onClose, language })
   }, []);
 
   const runAnalysis = useCallback(async (forceRefresh = false) => {
-    const cacheKey = `${hospital.name}_${language}`;
+    const cacheKey = hospital.name;
     console.log("[AI Analysis] 분석 시작:", hospital.name, "강제새로고침:", forceRefresh); // 디버깅용
 
     if (pendingAnalysis[cacheKey]) {
@@ -78,15 +77,12 @@ export const AIInsightPanel: React.FC<Props> = ({ hospital, onClose, language })
         }
 
         console.log("[AI Analysis] analyzeHospital 함수 호출");
-        console.log("CURRENT LANGUAGE =", language);
-
         const data = await analyzeHospital(
           hospital.name,
           hospital.address,
           hospital.type,
           hospital.hasGeneralExam,
-          forceRefresh,
-          language
+          forceRefresh
         );
         console.log("[AI Analysis] 분석 완료:", data);
         return data;
@@ -146,8 +142,7 @@ export const AIInsightPanel: React.FC<Props> = ({ hospital, onClose, language })
 
   const getSentimentLabel = (sentiment: string) => {
     switch (sentiment) {
-      case 'Positive':
-      return language === 'ko' ? '긍정적 여론' : 'Positive Sentiment';
+      case 'Positive': return '긍정적 여론';
       case 'Negative': return '부정적 여론';
       default: return '복합/중립';
     }
@@ -380,8 +375,7 @@ export const AIInsightPanel: React.FC<Props> = ({ hospital, onClose, language })
                   <section>
                     <h4 className="flex items-center text-sm font-bold text-slate-900 mb-3 uppercase tracking-wider">
                       <Clock className="h-4 w-4 mr-2 text-teal-400" />
-                     // 진료시간
-                     {language === 'ko' ? '진료시간' : 'Operating Hours'}
+                      진료시간
                       {result.operatingHours.source && (
                         <a 
                           href={result.operatingHours.source} 
@@ -403,8 +397,7 @@ export const AIInsightPanel: React.FC<Props> = ({ hospital, onClose, language })
                 <section>
                   <h4 className="flex items-center text-sm font-bold text-slate-900 mb-3 uppercase tracking-wider">
                     <Info className="h-4 w-4 mr-2 text-slate-400" />
-                   // 병원 요약
-                   {language === 'ko' ? '병원 요약' : 'Hospital Summary'}
+                    병원 요약
                   </h4>
                   <div className="text-sm text-slate-700 leading-7 border-l-2 border-blue-200 pl-4 py-1">
                     {result.summary}
@@ -415,23 +408,15 @@ export const AIInsightPanel: React.FC<Props> = ({ hospital, onClose, language })
                 <section>
                   <h4 className="flex items-center text-sm font-bold text-slate-900 mb-3 uppercase tracking-wider">
                     <Cpu className="h-4 w-4 mr-2 text-indigo-400" />
-                   
-                {language === 'ko'
-                ? '디지털 인프라 & AI 현황'
-                : 'Digital Infrastructure & AI Status'}
-  
+                    디지털 인프라 & AI 현황
                   </h4>
                   <div className="bg-slate-50 rounded-lg p-4 border border-slate-100 space-y-4">
                     <div>
-                      <span className="text-xs font-bold text-slate-500 block mb-1">
-                         {language === 'ko' ? '타 AI 솔루션 도입' : 'Other Solution Adoption'}
-                        </span>
+                      <span className="text-xs font-bold text-slate-500 block mb-1">타 AI 솔루션 도입</span>
                       <p className="text-sm text-slate-700 font-medium whitespace-pre-line">{result.aiAdoptionStatus}</p>
                     </div>
                     <div>
-                      <span className="text-xs font-bold text-slate-500 block mb-1">
-                         {language === 'ko' ? '사용 장비/시스템' : 'Equipment / Systems'}
-                        </span>
+                      <span className="text-xs font-bold text-slate-500 block mb-1">사용 장비/시스템</span>
                       <p className="text-sm text-slate-700">{result.equipmentInfo}</p>
                     </div>
                   </div>
@@ -441,10 +426,7 @@ export const AIInsightPanel: React.FC<Props> = ({ hospital, onClose, language })
                 <section>
                   <h4 className="flex items-center text-sm font-bold text-slate-900 mb-3 uppercase tracking-wider">
                     <Bot className="h-4 w-4 mr-2 text-teal-400" />
-                    {language === 'ko'
-                ? '영업 제안 포인트'
-                : 'Sales Opportunity & Recommendations'}
-
+                    영업 제안 포인트
                   </h4>
                   <div className="grid gap-3">
                     {result.ecgSalesPoints.map((point, idx) => (
@@ -461,7 +443,7 @@ export const AIInsightPanel: React.FC<Props> = ({ hospital, onClose, language })
                   <section>
                     <h4 className="flex items-center text-sm font-bold text-slate-900 mb-3 uppercase tracking-wider">
                       <Stethoscope className="h-4 w-4 mr-2 text-rose-400" />
-                      {language === 'ko' ? '주요 의료진' : 'Key Medical Staff'}
+                      주요 의료진
                       {result.doctorListPageUrl && (
                         <a 
                           href={result.doctorListPageUrl}
@@ -506,11 +488,7 @@ export const AIInsightPanel: React.FC<Props> = ({ hospital, onClose, language })
                 <section>
                   <h4 className="flex items-center text-sm font-bold text-slate-900 mb-3 uppercase tracking-wider">
                     <MessageSquare className="h-4 w-4 mr-2 text-violet-400" />
-                    {language === 'ko'
-  ? '환자 여론 (네이버/구글 리뷰)'
-  : 'Patient Sentiment (Naver / Google Reviews)'}환자 여론 (네이버/구글 리뷰)
-
-
+                    환자 여론 (네이버/구글 리뷰)
                     <span className={`ml-auto text-xs px-2.5 py-1 rounded-full font-bold border flex items-center gap-1.5 normal-case ${getSentimentColor(result.reviewSummary.sentiment)}`}>
                       {getSentimentIcon(result.reviewSummary.sentiment)}
                       {getSentimentLabel(result.reviewSummary.sentiment)}
@@ -525,7 +503,7 @@ export const AIInsightPanel: React.FC<Props> = ({ hospital, onClose, language })
                 <section>
                   <h4 className="flex items-center text-sm font-bold text-slate-900 mb-3 uppercase tracking-wider">
                     <Newspaper className="h-4 w-4 mr-2 text-orange-400" />
-                  {language === 'ko' ? '관련 최신 뉴스' : 'Latest Relevant News'}
+                    관련 최신 뉴스
                   </h4>
                   <ul className="space-y-3">
                     {result.recentNews.length > 0 ? (
@@ -557,11 +535,7 @@ export const AIInsightPanel: React.FC<Props> = ({ hospital, onClose, language })
                   <section>
                     <h4 className="flex items-center text-sm font-bold text-slate-900 mb-3 uppercase tracking-wider">
                       <Sparkles className="h-4 w-4 mr-2 text-amber-400" />
-                      {language === 'ko'
-  ? '추가 인사이트 & 유의사항'
-  : 'Additional Insights & Considerations'}
-                      
-
+                      추가 인사이트 & 유의사항
                     </h4>
                     <ul className="space-y-3">
                       {result.additionalInsights.map((insight, idx) => (

@@ -11,23 +11,6 @@ import { Filter, Search, SortAsc, Navigation, Crosshair, Loader2, ChevronDown, M
 
 const App: React.FC = () => {
   // State
-  const [language, setLanguage] = useState<'ko' | 'en'>('ko');
-  const t = {
-  ko: {
-    noReference: '없음 (자동 우선순위 정렬)',
-    searchHospital: '병원명 검색...',
-    allCities: '전체 도시',
-    prospectsFoundPrefix: '총',
-    prospectsFoundSuffix: '개의 잠재고객 발견',
-  },
-  en: {
-    noReference: 'None (Auto Priority Sorting)',
-    searchHospital: 'Search hospitals...',
-    allCities: 'All Cities',
-    prospectsFoundPrefix: 'Total',
-    prospectsFoundSuffix: 'prospects found',
-  },
-}[language];
   const [data, setData] = useState<Hospital[]>([]);
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState(''); // 디바운스된 검색어
   const locationUpdated = useRef(false); // 위치 업데이트 중복 방지
@@ -242,10 +225,7 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-800 selection:bg-teal-100">
-      <Header
-        language={language}
-        setLanguage={setLanguage}
-      />
+      <Header />
 
       <main className="container mx-auto px-4 py-8 max-w-7xl">
         
@@ -330,7 +310,7 @@ const App: React.FC = () => {
                      <Search className="absolute left-3.5 top-3 h-5 w-5 text-slate-400 group-focus-within:text-teal-500 transition-colors" />
                      <input
                        type="text"
-                       placeholder={t.searchHospital}
+                       placeholder="병원명 검색..."
                        className="w-full pl-11 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent transition-all hover:border-slate-300"
                        value={filters.searchQuery}
                        onChange={(e) => setFilters(prev => ({ ...prev, searchQuery: e.target.value }))}
@@ -340,7 +320,7 @@ const App: React.FC = () => {
                    <div className="flex gap-3 overflow-x-auto pb-2 lg:pb-0 items-center no-scrollbar">
                      {/* Styled Select Dropdowns */}
                      {[
-                       { value: filters.city, onChange: (v: string) => setFilters(p => ({ ...p, city: v })), options: cities, placeholder: t.allCities },
+                       { value: filters.city, onChange: (v: string) => setFilters(p => ({ ...p, city: v })), options: cities, placeholder: "전체 도시" },
                        { value: filters.district, onChange: (v: string) => setFilters(p => ({ ...p, district: v })), options: districts, placeholder: "전체 지역구" },
                        { value: filters.type, onChange: (v: string) => setFilters(p => ({ ...p, type: v })), options: types, placeholder: "전체 병원 유형" },
                      ].map((dropdown, idx) => (
@@ -380,27 +360,8 @@ const App: React.FC = () => {
                     <div className="flex items-center space-x-2">
                        <Database className="h-3 w-3" />
                        <span>Source: {typeof window.google !== 'undefined' && window.google.script ? 'Google Sheets (Live)' : 'Local CSV (Demo)'}</span>
-                       <span className="mx-1"></span>
-                       <span>
-                        {language === 'ko' ? (
-                          <>
-                            총{' '}
-                            <span className="font-bold text-slate-700">
-                              {filteredData.length}
-                            </span>
-                              개의 잠재고객 발견
-                      </>
-                    ) : (
-                      <>
-                        <span className="font-bold text-slate-700">
-                          {filteredData.length}
-                        </span>{' '}
-                    prospects found
-                       </>
-                            )}
-                    </span>
-                       
-                       
+                       <span className="mx-1">•</span>
+                       <span>총 <span className="font-bold text-slate-700">{filteredData.length}</span>개의 잠재고객 발견</span>
                     </div>
                  </div>
                </div>
@@ -418,8 +379,7 @@ const App: React.FC = () => {
       {selectedHospital && (
         <AIInsightPanel 
           hospital={selectedHospital} 
-          onClose={() => setSelectedHospital(null)}
-          language={language}
+          onClose={handleClosePanel} 
         />
       )}
     </div>
